@@ -1,12 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from pydantic import BaseModel
 from ..database import SessionLocal
 from ..models import Episode, Task
 from ..auth import get_current_user
-from ..services.embedder import Embedder, FaissIndexManager
-from ..services.pipeline import process_transcript
+from ..tasks import process_transcript_task
 
 
 router = APIRouter(prefix="/episodes", tags=["episodes"])
@@ -43,12 +42,11 @@ def list_episodes(page: int = 1, size: int = 10, status: str | None = None, db: 
     return {"items": [{"id": e.id, "title": e.title, "status": e.status} for e in rows], "page": page, "size": size, "total": total}
 
 
-embedder = Embedder()
-index_manager = FaissIndexManager()
+# 采用Celery异步处理，不在API进程内实例化Embedder/Index。
 
 
 @router.post("/transcript")
-def submit_transcript(req: TranscriptReq, bg: BackgroundTasks, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def submit_transcript(req: TranscriptReq, db: Session = Depends(get_db), user=Depends(get_current_user)):
     """
     提交转录文本并异步处理。
     需要鉴权。
@@ -57,12 +55,12 @@ def submit_transcript(req: TranscriptReq, bg: BackgroundTasks, db: Session = Dep
     if not ep:
         raise HTTPException(status_code=404, detail="节目不存在")
 
-    # 异步执行处理流水线
-    bg.add_task(process_transcript, db, req.episode_id, req.transcript, index_manager, embedder)
+    # 异步执行处理流水线（Celery）
     task = Task(episode_id=req.episode_id, type="transcript_process", status="pending", message="已提交，排队中")
     db.add(task)
     db.commit()
     db.refresh(task)
+    process_transcript_task.delay(task_id=task.id, episode_id=req.episode_id, transcript_text=req.transcript)
     return {"task_id": task.id, "message": "任务已创建"}
 
 

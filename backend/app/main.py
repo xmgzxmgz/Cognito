@@ -6,6 +6,8 @@ from .routers.upload import router as upload_router
 from .routers.query import router as query_router
 from .routers.auth import router as auth_router
 from .routers.episodes import router as episodes_router
+from .routers.intake import router as intake_router
+from .routers.tasks import router as tasks_router
 from .logger import setup_logger
 
 
@@ -38,6 +40,8 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(upload_router)
     app.include_router(episodes_router)
+    app.include_router(intake_router)
+    app.include_router(tasks_router)
     app.include_router(query_router)
 
     return app

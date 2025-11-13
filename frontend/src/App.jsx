@@ -21,6 +21,11 @@ function App() {
   const [taskId, setTaskId] = useState(null)
   const [taskStatus, setTaskStatus] = useState('')
 
+  // URL摄入
+  const [urlInput, setUrlInput] = useState('')
+  const [urlTaskId, setUrlTaskId] = useState(null)
+  const [urlTaskStatus, setUrlTaskStatus] = useState('')
+
   /**
    * 登录，获取JWT。
    * @returns {Promise<void>} 无返回值。
@@ -142,6 +147,37 @@ function App() {
     setTaskStatus(`${data.status} | ${data.message}`)
   }
 
+  /**
+   * 提交视频URL进行异步摄入。
+   * @returns {Promise<void>} 无返回值。
+   */
+  const submitUrlIngest = async () => {
+    if (!urlInput.trim()) return
+    const resp = await fetch('http://localhost:8000/intake/submit_url', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({ url: urlInput })
+    })
+    if (!resp.ok) { alert('提交URL失败'); return }
+    const data = await resp.json()
+    setUrlTaskId(data.task_id)
+    setUrlTaskStatus('pending')
+  }
+
+  /**
+   * 轮询URL摄入任务状态。
+   */
+  const pollUrlTask = async () => {
+    if (!urlTaskId) return
+    const resp = await fetch(`http://localhost:8000/tasks/${urlTaskId}`)
+    if (!resp.ok) return
+    const data = await resp.json()
+    setUrlTaskStatus(`${data.status} | ${data.message}${data.episode_id ? ' | Episode ' + data.episode_id : ''}`)
+  }
+
   return (
     <div className="container">
       <header>
@@ -156,6 +192,17 @@ function App() {
 
       <div className="layout">
         <div className="col-left">
+          <section className="card">
+            <h2>提交视频URL进行摄入</h2>
+            <div className="row" style={{ gap: 12 }}>
+              <input type="text" value={urlInput} onChange={(e) => setUrlInput(e.target.value)} placeholder="粘贴B站/油管/抖音/TikTok链接" />
+              <button onClick={submitUrlIngest} disabled={!token}>提交</button>
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <button onClick={pollUrlTask} disabled={!urlTaskId}>刷新任务状态</button>
+              <span style={{ marginLeft: 12, color: '#9aa5b1' }}>{urlTaskStatus}</span>
+            </div>
+          </section>
           <section className="card">
             <h2>上传音频文件</h2>
             <input type="file" accept=".mp3,.mp4,.wav,.m4a" onChange={handleUpload} disabled={uploading} />

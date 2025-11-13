@@ -38,14 +38,13 @@ def query(req: QueryRequest, db: Session = Depends(get_db)):
     """
     embedder = Embedder()
     index = FaissIndexManager()
-    # 尝试加载索引（使用默认维度，若未构建将返回空）
-    try:
-        # 使用bge-m3默认维度768（fastembed）
-        index.load(dim=768)
-    except Exception:
-        pass
-
+    # 先生成查询向量，再按其维度加载索引，避免硬编码维度不匹配
     vec = embedder.embed_texts([req.question])
+    try:
+        index.load(dim=vec.shape[1])
+    except Exception:
+        # 索引尚未构建时，load会新建空索引；此处容错即可
+        pass
     results = []
     if index.index is not None:
         results = index.search(vec, top_k=req.top_k)

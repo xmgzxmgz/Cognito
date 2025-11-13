@@ -9,7 +9,7 @@ from .database import SessionLocal
 from .models import User
 
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 security = HTTPBearer()
 
 JWT_SECRET = "cognito_dev_secret"  # 可迁移至环境变量

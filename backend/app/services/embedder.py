@@ -63,15 +63,33 @@ class FaissIndexManager:
 
 class Embedder:
     """
-    文本嵌入器，封装 FastEmbed 的 bge-m3 模型。
+    文本嵌入器，封装 FastEmbed 的多语种模型，并带兜底。
+
+    说明:
+        - 默认使用 "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"（768维，支持中文）。
+        - 支持通过环境变量 `EMBED_MODEL` 指定模型（例如："BAAI/bge-small-zh-v1.5" 以更快速度）。
+        - 若指定模型加载失败，则兜底到 "intfloat/multilingual-e5-large"（1024维，多语种，需前缀）。
+        - 维度由模型自带，不在此处硬编码；调用方以向量实际维度加载索引。
 
     方法:
         embed_texts(texts): 返回numpy数组的嵌入矩阵。
     """
 
     def __init__(self):
-        self.model = TextEmbedding(model_name="BAAI/bge-m3")
+        # 允许通过环境变量选择更小或更快的模型，提升首次下载速度
+        preferred = os.getenv("EMBED_MODEL", "sentence-transformers/paraphrase-multilingual-mpnet-base-v2")
+        try:
+            self.model = TextEmbedding(model_name=preferred)
+            # e5 系列模型需要前缀，其余模型不需要
+            self._need_prefix = preferred.startswith("intfloat/multilingual-e5")
+        except Exception:
+            # 兜底到 e5-large（需要Query/Passage前缀）
+            self.model = TextEmbedding(model_name="intfloat/multilingual-e5-large")
+            self._need_prefix = True
 
     def embed_texts(self, texts: List[str]) -> np.ndarray:
+        # e5 系列需要加前缀以区分查询/文档；此处统一作为“文档”嵌入
+        if self._need_prefix:
+            texts = [f"passage: {t}" for t in texts]
         vectors = list(self.model.embed(texts))
         return np.array(vectors, dtype="float32")
