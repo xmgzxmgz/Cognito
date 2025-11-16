@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import './App.css'
 
 /**
@@ -25,6 +25,26 @@ function App() {
   const [urlInput, setUrlInput] = useState('')
   const [urlTaskId, setUrlTaskId] = useState(null)
   const [urlTaskStatus, setUrlTaskStatus] = useState('')
+  const [urlTaskObj, setUrlTaskObj] = useState(null)
+  const [autoRefreshUrl, setAutoRefreshUrl] = useState(true)
+  const [urlTaskHistory, setUrlTaskHistory] = useState([])
+
+  /**
+   * 根据状态映射进度与颜色。
+   * @param {string} st - 任务状态
+   * @returns {{pct:number,color:string,label:string}}
+   */
+  const statusMeta = (st) => {
+    const map = {
+      pending: { pct: 10, color: '#9aa5b1', label: '已提交' },
+      downloading: { pct: 30, color: '#2f81f7', label: '下载中' },
+      transcribing: { pct: 60, color: '#b07ceb', label: '转写中' },
+      processing: { pct: 80, color: '#f59e0b', label: '处理中' },
+      succeeded: { pct: 100, color: '#10b981', label: '完成' },
+      failed: { pct: 100, color: '#ef4444', label: '失败' },
+    }
+    return map[st] || { pct: 0, color: '#9aa5b1', label: st || '未知' }
+  }
 
   /**
    * 登录，获取JWT。
@@ -148,23 +168,81 @@ function App() {
   }
 
   /**
+   * 确保有有效登录令牌：若不存在或失效则自动注册/登录 demo。
+   * 无参数。
+   * 返回值：Promise<void>
+   */
+  const ensureAuth = async () => {
+    let tk = localStorage.getItem('token') || ''
+    // 若已有令牌，尝试校验
+    if (tk) {
+      try {
+        const ping = await fetch('http://localhost:8000/auth/me', {
+          headers: { 'Authorization': `Bearer ${tk}` }
+        })
+        if (ping.ok) return
+      } catch (_) { /* 忽略网络错误，继续走自动登录 */ }
+    }
+    // 自动注册/登录 demo 账号
+    const username = 'demo'
+    const password = 'demo'
+    try {
+      await fetch('http://localhost:8000/auth/register', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password, role: 'creator' })
+      })
+    } catch (_) { /* 用户可能已存在，忽略 */ }
+    const resp = await fetch('http://localhost:8000/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    })
+    if (!resp.ok) throw new Error('自动登录失败')
+    const data = await resp.json()
+    localStorage.setItem('token', data.access_token)
+    setToken(data.access_token)
+  }
+
+  /**
    * 提交视频URL进行异步摄入。
    * @returns {Promise<void>} 无返回值。
    */
   const submitUrlIngest = async () => {
     if (!urlInput.trim()) return
-    const resp = await fetch('http://localhost:8000/intake/submit_url', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-      },
-      body: JSON.stringify({ url: urlInput })
-    })
-    if (!resp.ok) { alert('提交URL失败'); return }
-    const data = await resp.json()
-    setUrlTaskId(data.task_id)
-    setUrlTaskStatus('pending')
+    try {
+      // 保证鉴权有效
+      await ensureAuth()
+      const tk = localStorage.getItem('token') || ''
+      // 标准化URL：无协议时自动加 https://
+      let submitUrl = urlInput.trim()
+      if (!/^https?:\/\//i.test(submitUrl)) {
+        submitUrl = 'https://' + submitUrl.replace(/^\/\//, '')
+      }
+      const resp = await fetch('http://localhost:8000/intake/submit_url', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(tk ? { 'Authorization': `Bearer ${tk}` } : {})
+        },
+        body: JSON.stringify({ url: submitUrl })
+      })
+      if (!resp.ok) {
+        let msg = '提交URL失败'
+        try {
+          const err = await resp.json()
+          const detail = (typeof err === 'string') ? err : (err.detail || JSON.stringify(err))
+          msg += `：${detail}`
+        } catch (_) { msg += `：HTTP ${resp.status}` }
+        alert(msg)
+        return
+      }
+      const data = await resp.json()
+      setUrlTaskId(data.task_id)
+      setUrlTaskStatus('pending')
+      setUrlTaskObj({ id: data.task_id, status: 'pending', message: '已提交，排队中' })
+      setUrlTaskHistory((h) => [...h, { ts: Date.now(), status: 'pending', message: '已提交，排队中' }])
+    } catch (e) {
+      alert(`提交URL失败：${e.message}`)
+    }
   }
 
   /**
@@ -176,7 +254,28 @@ function App() {
     if (!resp.ok) return
     const data = await resp.json()
     setUrlTaskStatus(`${data.status} | ${data.message}${data.episode_id ? ' | Episode ' + data.episode_id : ''}`)
+    setUrlTaskObj(data)
+    setUrlTaskHistory((h) => {
+      const last = h[h.length - 1]
+      if (!last || last.status !== data.status || last.message !== data.message) {
+        return [...h, { ts: Date.now(), status: data.status, message: data.message }]
+      }
+      return h
+    })
   }
+
+  // 自动轮询：当启用自动刷新且存在任务ID时，每2秒轮询一次直到终态
+  useEffect(() => {
+    if (!autoRefreshUrl || !urlTaskId) return
+    const isTerminal = (s) => s === 'succeeded' || s === 'failed'
+    const timer = setInterval(() => {
+      const st = urlTaskObj?.status
+      if (st && isTerminal(st)) { clearInterval(timer); return }
+      pollUrlTask()
+    }, 2000)
+    return () => clearInterval(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRefreshUrl, urlTaskId, urlTaskObj?.status])
 
   return (
     <div className="container">
@@ -200,8 +299,36 @@ function App() {
             </div>
             <div style={{ marginTop: 8 }}>
               <button onClick={pollUrlTask} disabled={!urlTaskId}>刷新任务状态</button>
-              <span style={{ marginLeft: 12, color: '#9aa5b1' }}>{urlTaskStatus}</span>
+              <label style={{ marginLeft: 12 }}>
+                <input type="checkbox" checked={autoRefreshUrl} onChange={(e) => setAutoRefreshUrl(e.target.checked)} /> 自动刷新
+              </label>
             </div>
+            {urlTaskObj && (
+              <div className="status-panel">
+                <div className="status-header">
+                  <span className="badge" style={{ background: statusMeta(urlTaskObj.status).color }}>
+                    {statusMeta(urlTaskObj.status).label}
+                  </span>
+                  <span style={{ marginLeft: 12, color: '#9aa5b1' }}>{urlTaskObj.message}</span>
+                  {urlTaskObj.episode_id ? (
+                    <span style={{ marginLeft: 12, color: '#9aa5b1' }}>
+                      Episode {urlTaskObj.episode_id}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="progress">
+                  <div className="bar" style={{ width: `${statusMeta(urlTaskObj.status).pct}%`, background: statusMeta(urlTaskObj.status).color }} />
+                </div>
+                <div className="timeline">
+                  {urlTaskHistory.slice(-8).map((it, i) => (
+                    <div key={i} className="timeline-item">
+                      <span className="dot" style={{ background: statusMeta(it.status).color }} />
+                      <span className="text">{new Date(it.ts).toLocaleTimeString()} · {statusMeta(it.status).label} · {it.message}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </section>
           <section className="card">
             <h2>上传音频文件</h2>

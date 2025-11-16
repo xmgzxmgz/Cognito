@@ -76,3 +76,21 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 .chunks ul { list-style: none; padding: 0; margin: 0; }
 .chunks li { padding: 8px 0; border-bottom: 1px dashed var(--border); }
 .chunks li:last-child { border-bottom: none; }
+
+/* ---- 任务状态可视化 ---- */
+.status-panel { margin-top: 12px; }
+.status-header { display: flex; align-items: center; }
+.badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: #0c0f14;
+  font-weight: 700;
+}
+.progress { height: 8px; background: #0c0f14; border-radius: 999px; border: 1px solid var(--border); margin-top: 10px; overflow: hidden; }
+.progress .bar { height: 100%; border-radius: 999px; transition: width 0.25s ease; }
+.timeline { margin-top: 10px; border-left: 2px dashed var(--border); padding-left: 10px; }
+.timeline-item { display: flex; align-items: center; margin: 6px 0; }
+.timeline .dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; }
+.timeline .text { color: var(--muted); font-size: 12px; }
