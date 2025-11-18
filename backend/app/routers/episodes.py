@@ -6,6 +6,7 @@ from ..database import SessionLocal
 from ..models import Episode, Task
 from ..auth import get_current_user
 from ..tasks import process_transcript_task
+import os
 
 
 router = APIRouter(prefix="/episodes", tags=["episodes"])
@@ -60,7 +61,14 @@ def submit_transcript(req: TranscriptReq, db: Session = Depends(get_db), user=De
     db.add(task)
     db.commit()
     db.refresh(task)
-    process_transcript_task.delay(task_id=task.id, episode_id=req.episode_id, transcript_text=req.transcript)
+    run_inline = os.getenv("RUN_INLINE_TASKS", "0").lower() in {"1", "true", "yes"}
+    if run_inline:
+        try:
+            process_transcript_task(task_id=task.id, episode_id=req.episode_id, transcript_text=req.transcript)
+        except Exception:
+            pass
+    else:
+        process_transcript_task.delay(task_id=task.id, episode_id=req.episode_id, transcript_text=req.transcript)
     return {"task_id": task.id, "message": "任务已创建"}
 
 

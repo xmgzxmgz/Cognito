@@ -117,9 +117,12 @@ def process_transcript(db: Session, episode_id: int, transcript_text: str, index
         for c in created_chunks:
             db.refresh(c)
 
-        vectors = embedder.embed_texts([c.text for c in created_chunks])
-        index_manager.load(dim=vectors.shape[1])
-        index_manager.add_vectors(vectors, [c.id for c in created_chunks])
+        try:
+            vectors = embedder.embed_texts([c.text for c in created_chunks])
+            index_manager.load(dim=vectors.shape[1])
+            index_manager.add_vectors(vectors, [c.id for c in created_chunks])
+        except Exception:
+            pass
 
         # 生成摘要占位
         ep_summary = _simple_summarize(cleaned)
